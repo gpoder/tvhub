@@ -11,6 +11,13 @@ app = Flask(__name__)
 registry = DeviceRegistry()
 plugins = load_plugins()
 
+def refresh_registry():
+    """Reload devices from devices.json so API sees latest discoveries."""
+    try:
+        registry.load()
+    except Exception as e:
+        app.logger.exception("Error refreshing registry: %s", e)
+
 REMOTE_HTML = """<!doctype html>
 <html>
 <head>
@@ -322,6 +329,9 @@ def remote():
 
 @app.route("/api/devices")
 def api_devices():
+    # Always reload in case discovery has updated devices.json
+    refresh_registry()
+
     ds = [
         {
             "id": d.id,
@@ -334,7 +344,6 @@ def api_devices():
         for d in registry.all()
     ]
     return jsonify({"ok": True, "devices": ds})
-
 
 @app.route("/api/device/<dev_id>/action/<action>", methods=["GET", "POST"])
 def api_action(dev_id, action):
