@@ -14,7 +14,7 @@ log_section() {
 }
 
 # ----------------------------------------------------
-# 1. Check system services
+# 1. Check systemd services
 # ----------------------------------------------------
 log_section "SYSTEMD SERVICES STATUS"
 
@@ -25,18 +25,58 @@ for svc in tvhub tvhub-discover tvhub-discover.timer; do
 done
 
 # ----------------------------------------------------
-# 2. Extract last logs
+# 2. Identify tvhub process & python path
 # ----------------------------------------------------
-log_section "RECENT LOGS (journalctl)"
+log_section "PROCESS & PYTHON PATH CHECK"
 
-for svc in tvhub tvhub-discover; do
-    echo "### Logs for $svc (last 50 lines)" >> "$OUT"
-    journalctl -u "$svc" -n 50 --no-pager >> "$OUT"
+PID=$(pidof /opt/tvhub/venv/bin/python)
+if [ -z "$PID" ]; then
+    PID=$(pidof python)
+fi
+
+if [ -z "$PID" ]; then
+    echo "❌ No tvhub python process running!" >> "$OUT"
+else
+    echo "tvhub python PID: $PID" >> "$OUT"
     echo "" >> "$OUT"
-done
+
+    # Show command
+    ps -fp "$PID" >> "$OUT"
+    echo "" >> "$OUT"
+
+    # Show environment seen by the process
+    echo "### Environment for PID $PID" >> "$OUT"
+    tr '\0' '\n' < /proc/$PID/environ | sort >> "$OUT"
+    echo "" >> "$OUT"
+
+    # Check open files
+    echo "### lsof for PID $PID (looking for devices.json)" >> "$OUT"
+    lsof -p $PID 2>/dev/null | grep -i devices.json >> "$OUT"
+    echo "" >> "$OUT"
+fi
 
 # ----------------------------------------------------
-# 3. Check Python venv and module load
+# 3. Permissions check
+# ----------------------------------------------------
+log_section "PERMISSIONS CHECK"
+
+echo "### Directory /var/lib/tvhub:" >> "$OUT"
+ls -ld /var/lib/tvhub >> "$OUT"
+
+echo "### File /var/lib/tvhub/devices.json:" >> "$OUT"
+ls -l /var/lib/tvhub/devices.json 2>>"$OUT" >> "$OUT"
+echo "" >> "$OUT"
+
+echo "### tvhub user permissions test:" >> "$OUT"
+sudo -u tvhub test -r /var/lib/tvhub/devices.json \
+    && echo "tvhub CAN read devices.json" >> "$OUT" \
+    || echo "❌ tvhub CANNOT read devices.json" >> "$OUT"
+sudo -u tvhub test -w /var/lib/tvhub/devices.json \
+    && echo "tvhub CAN write devices.json" >> "$OUT" \
+    || echo "⚠ tvhub cannot write devices.json" >> "$OUT"
+
+# ----------------------------------------------------
+# 4. Check Python environment
 # ----------------------------------------------------
 log_section "PYTHON ENVIRONMENT CHECK"
 
@@ -49,7 +89,7 @@ else
 fi
 
 # ----------------------------------------------------
-# 4. Validate devices.json
+# 5. Validate devices.json
 # ----------------------------------------------------
 log_section "DEVICES.JSON CHECK"
 
@@ -57,24 +97,47 @@ DEV="/var/lib/tvhub/devices.json"
 
 if [ -f "$DEV" ]; then
     echo "devices.json exists." >> "$OUT"
-    echo "Syntax validation:" >> "$OUT"
-    cat "$DEV" | jq . >/dev/null 2>>"$OUT"
+    echo "" >> "$OUT"
 
-    if [ $? -eq 0 ]; then
-        echo "JSON is valid." >> "$OUT"
-    else
-        echo "❌ INVALID JSON (see above)" >> "$OUT"
-    fi
+    echo "### Syntax check:" >> "$OUT"
+    jq . "$DEV" >/dev/null 2>>"$OUT" \
+        && echo "JSON valid" >> "$OUT" \
+        || echo "❌ INVALID JSON" >> "$OUT"
 
     echo "" >> "$OUT"
     echo "Contents:" >> "$OUT"
     cat "$DEV" >> "$OUT"
+
 else
     echo "❌ devices.json missing!" >> "$OUT"
 fi
 
 # ----------------------------------------------------
-# 5. Check adb path & version
+# 6. Detect stray devices.json in /opt
+# ----------------------------------------------------
+log_section "SEARCH FOR STRAY DEVICES.JSON"
+
+find /opt/tvhub -maxdepth 3 -name devices.json 2>/dev/null >> "$OUT"
+
+# ----------------------------------------------------
+# 7. Registry Diagnostics (Python one-shot)
+# ----------------------------------------------------
+log_section "PYTHON REGISTRY SELF-CHECK"
+
+cat << 'EOF' | /opt/tvhub/venv/bin/python3 >> "$OUT" 2>&1
+from tvhub.registry import DeviceRegistry
+import os
+print("Python sees TVHUB_DATA_DIR =", os.environ.get("TVHUB_DATA_DIR"))
+r = DeviceRegistry()
+print("Registry FILE IS:", r.path)
+try:
+    print("Registry LOAD RESULT:", r.load())
+except Exception as e:
+    print("Registry LOAD ERROR:", e)
+EOF
+
+# ----------------------------------------------------
+# 8. ADB check
 # ----------------------------------------------------
 log_section "ADB CHECK"
 
@@ -86,31 +149,16 @@ else
 fi
 
 # ----------------------------------------------------
-# 6. Scan ports for common TV types
-# ----------------------------------------------------
-log_section "NETWORK PORT SCAN"
-
-TV_IPS=$(jq -r '.[].address' "$DEV" 2>/dev/null | sed 's/:.*//')
-
-for ip in $TV_IPS; do
-    echo "### Checking $ip" >> "$OUT"
-    nc -zv "$ip" 1969 2>&1 | sed 's/^/    /' >> "$OUT"
-    nc -zv "$ip" 2870 2>&1 | sed 's/^/    /' >> "$OUT"
-    echo "" >> "$OUT"
-done
-
-# ----------------------------------------------------
-# 7. Test API responsiveness
+# 9. API test
 # ----------------------------------------------------
 log_section "API TEST"
 
 curl -s http://127.0.0.1:10001/api/devices | jq . >> "$OUT" 2>&1
 
 # ----------------------------------------------------
-# 8. Summary
+# 10. Summary
 # ----------------------------------------------------
 log_section "SUMMARY"
-
 echo "Health check completed." >> "$OUT"
 echo "Output saved to: $OUT" >> "$OUT"
 echo "" >> "$OUT"
