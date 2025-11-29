@@ -1,1 +1,2 @@
-# tvhub
+# TVHub
+Modular TV control.
