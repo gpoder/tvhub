@@ -1,0 +1,16 @@
+[Unit]
+Description=TVHub Flask API
+After=network.target
+
+[Service]
+Type=simple
+User=tvhub
+Group=tvhub
+Environment=TVHUB_DATA_DIR=/var/lib/tvhub
+Environment=TVHUB_ADB_BIN=/opt/platform-tools/adb
+WorkingDirectory=/opt/tvhub
+ExecStart=/usr/bin/python3 -m tvhub.app
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

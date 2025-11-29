@@ -1,0 +1,10 @@
+[Unit]
+Description=Run TVHub discovery every 30 seconds
+
+[Timer]
+OnBootSec=15
+OnUnitActiveSec=30
+Unit=tvhub-discover.service
+
+[Install]
+WantedBy=timers.target

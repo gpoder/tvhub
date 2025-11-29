@@ -1,0 +1,10 @@
+[Unit]
+Description=TVHub discovery run
+
+[Service]
+Type=oneshot
+User=tvhub
+Group=tvhub
+Environment=TVHUB_DATA_DIR=/var/lib/tvhub
+WorkingDirectory=/opt/tvhub
+ExecStart=/usr/bin/python3 -m tvhub.discover_all
